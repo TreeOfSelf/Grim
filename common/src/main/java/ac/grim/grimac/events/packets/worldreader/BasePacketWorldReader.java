@@ -129,7 +129,11 @@ public class BasePacketWorldReader extends PacketListenerAbstract {
             event.getTasksAfterSend().add(player::sendTransaction); // Player is in this unloaded chunk
         }
         if (isGroundUp) {
-            Column column = new Column(chunkX, chunkZ, chunks, player.lastTransactionSent.get());
+            // A resend of a chunk the client already has: the client swaps the data in place and never unloads it, so
+            // keep the old column's transaction. A new one would count the player as in an unloaded chunk until the
+            // client answers, and every movement in between gets force-resynced (rubberbanding).
+            Column existing = player.compensatedWorld.getChunk(chunkX, chunkZ);
+            Column column = new Column(chunkX, chunkZ, chunks, existing != null ? existing.transaction() : player.lastTransactionSent.get());
             player.compensatedWorld.addToCache(column, chunkX, chunkZ, tileEntities);
         } else {
             player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> {
