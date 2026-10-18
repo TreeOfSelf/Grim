@@ -7,12 +7,14 @@ import ac.grim.grimac.checks.impl.verbose.VerboseCodecs;
 import ac.grim.grimac.checks.type.BlockBreakListener;
 import ac.grim.grimac.checks.type.PreViaPacketReceiveListener;
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.utils.anticheat.LogUtil;
 import ac.grim.grimac.utils.anticheat.update.BlockBreak;
 import ac.grim.grimac.utils.math.GrimMath;
 import ac.grim.grimac.utils.nmsutil.BlockBreakSpeed;
 import ac.grim.grimac.utils.viaversion.ViaVersionUtil;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.protocol.item.ItemStack;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
@@ -53,6 +55,8 @@ public class FastBreak extends Check implements BlockBreakListener, PreViaPacket
     // The buffer to this check
     double blockBreakBalance = 0;
     double blockDelayBalance = 0;
+    // Last time a held item mismatch with the server was logged
+    long lastMismatchLog = 0;
 
     @Override
     public void onBlockBreak(BlockBreak blockBreak) {
@@ -75,7 +79,7 @@ public class FastBreak extends Check implements BlockBreakListener, PreViaPacket
             targetBlockPosition = blockBreak.position;
 
             // FIXME: getBlockDamage might not return the correct value if the player switched slots before this
-            maximumBlockDamage = BlockBreakSpeed.getBlockDamage(player, block);
+            maximumBlockDamage = Math.max(BlockBreakSpeed.getBlockDamage(player, block), serverHeldItemDamage(block));
 
             double breakDelay = System.currentTimeMillis() - lastFinishBreak;
 
@@ -128,8 +132,28 @@ public class FastBreak extends Check implements BlockBreakListener, PreViaPacket
         // listen for flying packets because some block breaks can happen before the next animation (somehow???), causing onGround desync
         boolean flying = WrapperPlayClientPlayerFlying.isFlying(event.getPacketType());
         if ((flying || player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_9) && isAnimation(event.getPacketType())) && targetBlockPosition != null) {
-            maximumBlockDamage = Math.max(maximumBlockDamage, BlockBreakSpeed.getBlockDamage(player, player.compensatedWorld.getBlock(targetBlockPosition)));
+            WrappedBlockState target = player.compensatedWorld.getBlock(targetBlockPosition);
+            maximumBlockDamage = Math.max(maximumBlockDamage, Math.max(BlockBreakSpeed.getBlockDamage(player, target), serverHeldItemDamage(target)));
         }
+    }
+
+    // Grim's copy of the held item can drift from the server's (seen on 26.3: a pickaxe counted as an empty hand, so
+    // every finished break looked seconds too fast, the balance never came down and every break got cancelled until
+    // the player reconnected). The server breaks the block with the item it has in the player's hand, so a break is
+    // never too fast for that item: use whichever of the two items mines faster.
+    private double serverHeldItemDamage(WrappedBlockState block) {
+        if (player.platformPlayer == null) return 0;
+        ItemStack serverItem = player.platformPlayer.getInventory().getItemInHand();
+        if (serverItem == null) return 0;
+
+        ItemStack grimItem = player.inventory.getHeldItem();
+        if (grimItem.getType() != serverItem.getType() && System.currentTimeMillis() - lastMismatchLog > 60_000) {
+            lastMismatchLog = System.currentTimeMillis();
+            LogUtil.info("FastBreak held item mismatch for " + player.getName() + ": grim=" + grimItem.getType().getName()
+                    + " (slot " + player.packetStateData.lastSlotSelected + "/" + player.inventory.inventory.getSelected() + ")"
+                    + ", server=" + serverItem.getType().getName() + ", block=" + block.getType().getName());
+        }
+        return BlockBreakSpeed.getBlockDamage(player, serverItem, block.getType());
     }
 
     private void clampBalance() {
