@@ -35,6 +35,8 @@ public class Fabric261ConversionUtil implements IFabricConversionUtil {
             PacketWrapper<?> wrapper = PacketWrapper.createUniversalPacketWrapper(buffer);
             return wrapper.readItemStack();
         } catch (Exception e) {
+            // Read from a netty thread: the server thread can empty the stack between the check above and the encode
+            if (fabricStack.isEmpty()) return ItemStack.EMPTY;
             LogUtil.error("Failed to encode ItemStack: " + fabricStack, e);
             return ItemStack.EMPTY;
         } finally {
