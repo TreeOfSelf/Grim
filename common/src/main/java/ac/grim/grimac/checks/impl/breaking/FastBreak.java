@@ -154,9 +154,15 @@ public class FastBreak extends Check implements BlockBreakListener, PacketReceiv
         ItemStack grimItem = player.inventory.getHeldItem();
         if (grimItem.getType() != serverItem.getType() && System.currentTimeMillis() - lastMismatchLog > 60_000) {
             lastMismatchLog = System.currentTimeMillis();
+            // What the server has in the slot Grim thinks is selected: same as Grim's item = the selected slot drifted,
+            // different = Grim's copy of that slot's contents drifted
+            int grimSlot = player.inventory.inventory.getSelected();
+            ItemStack serverAtGrimSlot = player.platformPlayer.getInventory().getStack(grimSlot, grimSlot + 36);
             LogUtil.info("FastBreak held item mismatch for " + player.getName() + ": grim=" + grimItem.getType().getName()
-                    + " (slot " + player.packetStateData.lastSlotSelected + "/" + player.inventory.inventory.getSelected() + ")"
-                    + ", server=" + serverItem.getType().getName() + ", block=" + block.getType().getName());
+                    + " (slot " + player.packetStateData.lastSlotSelected + "/" + grimSlot + ")"
+                    + ", server=" + serverItem.getType().getName()
+                    + ", server slot " + grimSlot + "=" + (serverAtGrimSlot == null ? "null" : serverAtGrimSlot.getType().getName())
+                    + ", block=" + block.getType().getName());
         }
         return BlockBreakSpeed.getBlockDamage(player, serverItem, block.getType());
     }
